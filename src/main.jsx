@@ -20,6 +20,17 @@ import './styles.css';
 
 const CSV_URL = `${import.meta.env.BASE_URL}data/cards.csv`;
 const NO_DIALOGUE = 'all';
+const STORAGE_KEY = 'flashy-chinese-state-v1';
+
+function loadSavedState() {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
 
 function inferDialogue(theme) {
   const normalized = theme?.trim() ?? '';
@@ -118,6 +129,14 @@ function shuffleCards(cards) {
     .map(({ card }) => card);
 }
 
+function orderCardsByIds(cards, ids) {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
+  const seen = new Set(ordered.map((card) => card.id));
+  const missing = cards.filter((card) => !seen.has(card.id));
+  return [...ordered, ...missing];
+}
+
 function sortCardsForStudy(cards, selectedDialogue) {
   if (selectedDialogue === NO_DIALOGUE) return cards;
 
@@ -129,19 +148,22 @@ function sortCardsForStudy(cards, selectedDialogue) {
 }
 
 function App() {
+  const savedStateRef = useRef(loadSavedState());
+  const didMountRef = useRef(false);
   const [cards, setCards] = useState([]);
   const [loadState, setLoadState] = useState('loading');
-  const [selectedTheme, setSelectedTheme] = useState('all');
-  const [selectedWeek, setSelectedWeek] = useState('all');
-  const [selectedDialogue, setSelectedDialogue] = useState(NO_DIALOGUE);
-  const [studyDirection, setStudyDirection] = useState('zh-fr');
-  const [viewMode, setViewMode] = useState('card');
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showPinyin, setShowPinyin] = useState(true);
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [flippedListCards, setFlippedListCards] = useState(() => new Set());
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isShuffled, setIsShuffled] = useState(false);
+  const [selectedTheme, setSelectedTheme] = useState(() => savedStateRef.current.selectedTheme || 'all');
+  const [selectedWeek, setSelectedWeek] = useState(() => savedStateRef.current.selectedWeek || 'all');
+  const [selectedDialogue, setSelectedDialogue] = useState(() => savedStateRef.current.selectedDialogue || NO_DIALOGUE);
+  const [studyDirection, setStudyDirection] = useState(() => savedStateRef.current.studyDirection || 'zh-fr');
+  const [viewMode, setViewMode] = useState(() => savedStateRef.current.viewMode || 'card');
+  const [isMenuOpen, setIsMenuOpen] = useState(() => Boolean(savedStateRef.current.isMenuOpen));
+  const [showPinyin, setShowPinyin] = useState(() => savedStateRef.current.showPinyin ?? true);
+  const [isFlipped, setIsFlipped] = useState(() => Boolean(savedStateRef.current.isFlipped));
+  const [flippedListCards, setFlippedListCards] = useState(() => new Set(savedStateRef.current.flippedListCards || []));
+  const [currentIndex, setCurrentIndex] = useState(() => savedStateRef.current.currentIndex || 0);
+  const [isShuffled, setIsShuffled] = useState(() => Boolean(savedStateRef.current.isShuffled));
+  const [shuffledCardIds, setShuffledCardIds] = useState(() => savedStateRef.current.shuffledCardIds || []);
   const [shuffleKey, setShuffleKey] = useState(0);
   const [touchStart, setTouchStart] = useState(null);
   const [voices, setVoices] = useState([]);
@@ -194,14 +216,80 @@ function App() {
   const filteredCards = useMemo(() => {
     const filtered = orderedFilteredCards;
     if (selectedDialogue !== NO_DIALOGUE) return sortCardsForStudy(filtered, selectedDialogue);
-    return isShuffled ? shuffleCards(filtered) : filtered;
-  }, [orderedFilteredCards, selectedDialogue, isShuffled, shuffleKey]);
+    return isShuffled ? orderCardsByIds(filtered, shuffledCardIds) : filtered;
+  }, [orderedFilteredCards, selectedDialogue, isShuffled, shuffledCardIds]);
 
   const currentCard = filteredCards[currentIndex] ?? null;
   const total = filteredCards.length;
   const frontIsChinese = studyDirection === 'zh-fr';
   const chineseVoice = useMemo(() => findChineseVoice(voices), [voices]);
   const isDialogueMode = selectedDialogue !== NO_DIALOGUE;
+
+  useEffect(() => {
+    if (!isShuffled || selectedDialogue !== NO_DIALOGUE || !orderedFilteredCards.length) return;
+
+    const filteredIds = new Set(orderedFilteredCards.map((card) => card.id));
+    const keptIds = shuffledCardIds.filter((id) => filteredIds.has(id));
+    const missingIds = orderedFilteredCards.map((card) => card.id).filter((id) => !keptIds.includes(id));
+    const hasValidOrder = keptIds.length > 0 && missingIds.length === 0 && keptIds.length === shuffledCardIds.length;
+
+    if (!hasValidOrder) {
+      setShuffledCardIds(keptIds.length ? [...keptIds, ...missingIds] : shuffleCards(orderedFilteredCards).map((card) => card.id));
+    }
+  }, [isShuffled, orderedFilteredCards, selectedDialogue, shuffledCardIds]);
+
+  useEffect(() => {
+    const savedCardId = savedStateRef.current.currentCardId;
+    if (!savedCardId || !filteredCards.length) return;
+
+    const restoredIndex = filteredCards.findIndex((card) => card.id === savedCardId);
+    if (restoredIndex >= 0) {
+      setCurrentIndex(restoredIndex);
+      savedStateRef.current.currentCardId = '';
+    }
+  }, [filteredCards]);
+
+  useEffect(() => {
+    if (loadState !== 'ready') return;
+
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          selectedTheme,
+          selectedWeek,
+          selectedDialogue,
+          studyDirection,
+          viewMode,
+          isMenuOpen,
+          showPinyin,
+          isFlipped,
+          flippedListCards: [...flippedListCards],
+          currentIndex,
+          currentCardId: currentCard?.id || '',
+          isShuffled,
+          shuffledCardIds,
+        }),
+      );
+    } catch {
+      // localStorage can be unavailable in some private browsing contexts.
+    }
+  }, [
+    currentCard?.id,
+    currentIndex,
+    flippedListCards,
+    isFlipped,
+    isMenuOpen,
+    isShuffled,
+    loadState,
+    selectedDialogue,
+    selectedTheme,
+    selectedWeek,
+    showPinyin,
+    shuffledCardIds,
+    studyDirection,
+    viewMode,
+  ]);
 
   useEffect(() => {
     if (selectedTheme !== 'all' && !themes.includes(selectedTheme)) {
@@ -216,6 +304,11 @@ function App() {
   }, [dialogues, selectedDialogue]);
 
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+
     setCurrentIndex(0);
     setIsFlipped(false);
     setFlippedListCards(new Set());
@@ -270,7 +363,10 @@ function App() {
   }
 
   function toggleShuffle() {
-    if (!isShuffled) setShuffleKey((value) => value + 1);
+    if (!isShuffled) {
+      setShuffledCardIds(shuffleCards(orderedFilteredCards).map((card) => card.id));
+      setShuffleKey((value) => value + 1);
+    }
     setIsShuffled((current) => !current);
   }
 
