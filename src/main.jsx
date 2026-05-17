@@ -7,7 +7,9 @@ import {
   Eye,
   EyeOff,
   Layers,
+  Menu,
   MessageCircle,
+  X,
   RefreshCcw,
   RotateCcw,
   Shuffle,
@@ -133,9 +135,13 @@ function App() {
   const [selectedWeek, setSelectedWeek] = useState('all');
   const [selectedDialogue, setSelectedDialogue] = useState(NO_DIALOGUE);
   const [studyDirection, setStudyDirection] = useState('zh-fr');
+  const [viewMode, setViewMode] = useState('card');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showPinyin, setShowPinyin] = useState(true);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [flippedListCards, setFlippedListCards] = useState(() => new Set());
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isShuffled, setIsShuffled] = useState(false);
   const [shuffleKey, setShuffleKey] = useState(0);
   const [touchStart, setTouchStart] = useState(null);
   const [voices, setVoices] = useState([]);
@@ -176,17 +182,20 @@ function App() {
     return uniqueSorted(weekCards.map((card) => card.dialogue));
   }, [weekCards]);
 
-  const filteredCards = useMemo(() => {
-    const filtered = cards.filter((card) => {
+  const orderedFilteredCards = useMemo(() => {
+    return cards.filter((card) => {
       const themeMatches = selectedTheme === 'all' || card.theme === selectedTheme;
       const weekMatches = selectedWeek === 'all' || String(card.week) === selectedWeek;
       const dialogueMatches = selectedDialogue === NO_DIALOGUE || card.dialogue === selectedDialogue;
       return themeMatches && weekMatches && dialogueMatches;
     });
+  }, [cards, selectedTheme, selectedWeek, selectedDialogue]);
 
+  const filteredCards = useMemo(() => {
+    const filtered = orderedFilteredCards;
     if (selectedDialogue !== NO_DIALOGUE) return sortCardsForStudy(filtered, selectedDialogue);
-    return shuffleKey ? shuffleCards(filtered) : filtered;
-  }, [cards, selectedTheme, selectedWeek, selectedDialogue, shuffleKey]);
+    return isShuffled ? shuffleCards(filtered) : filtered;
+  }, [orderedFilteredCards, selectedDialogue, isShuffled, shuffleKey]);
 
   const currentCard = filteredCards[currentIndex] ?? null;
   const total = filteredCards.length;
@@ -209,7 +218,8 @@ function App() {
   useEffect(() => {
     setCurrentIndex(0);
     setIsFlipped(false);
-  }, [selectedTheme, selectedWeek, selectedDialogue, studyDirection, showPinyin, shuffleKey]);
+    setFlippedListCards(new Set());
+  }, [selectedTheme, selectedWeek, selectedDialogue, studyDirection, showPinyin, isShuffled, shuffleKey, viewMode]);
 
   useEffect(() => {
     if (currentIndex > Math.max(total - 1, 0)) {
@@ -233,17 +243,35 @@ function App() {
     setTouchStart(null);
   }
 
-  function playChinese(event) {
+  function playCardChinese(card, event) {
     event.stopPropagation();
-    if (!currentCard) return;
+    if (!card) return;
 
-    if (currentCard.audio) {
-      const audio = new Audio(currentCard.audio);
-      audio.play().catch(() => speakWithBrowser(currentCard.chinese, chineseVoice));
+    if (card.audio) {
+      const audio = new Audio(card.audio);
+      audio.play().catch(() => speakWithBrowser(card.chinese, chineseVoice));
       return;
     }
 
-    speakWithBrowser(currentCard.chinese, chineseVoice);
+    speakWithBrowser(card.chinese, chineseVoice);
+  }
+
+  function playChinese(event) {
+    playCardChinese(currentCard, event);
+  }
+
+  function toggleListCard(cardId) {
+    setFlippedListCards((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  }
+
+  function toggleShuffle() {
+    if (!isShuffled) setShuffleKey((value) => value + 1);
+    setIsShuffled((current) => !current);
   }
 
   const front = frontIsChinese ? 'chinese' : 'french';
@@ -254,87 +282,119 @@ function App() {
     <main className="app-shell">
       <section className="topbar" aria-label="App summary">
         <div>
-          <p className="eyebrow">Flashy Chinese</p>
-          <h1>Cartes de cours</h1>
+          <h1>Flashy Chinese</h1>
         </div>
-        <div className="count-pill" aria-label={`${total} cartes disponibles`}>
-          <BookOpen size={18} />
-          <span>{total}</span>
+        <div className="top-actions">
+          <div className="count-pill" aria-label={`${total} cartes disponibles`}>
+            <BookOpen size={18} />
+            <span>{total}</span>
+          </div>
+          <button
+            className="menu-button"
+            type="button"
+            onClick={() => setIsMenuOpen((value) => !value)}
+            aria-expanded={isMenuOpen}
+            aria-controls="settings-panel"
+            aria-label={isMenuOpen ? 'Fermer les réglages' : 'Ouvrir les réglages'}
+          >
+            {isMenuOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
         </div>
       </section>
 
-      <section className="controls" aria-label="Study controls">
-        <label>
-          <span>Thème</span>
-          <select value={selectedTheme} onChange={(event) => setSelectedTheme(event.target.value)}>
-            <option value="all">Tous</option>
-            {themes.map((theme) => (
-              <option key={theme} value={theme}>
-                {theme}
-              </option>
-            ))}
-          </select>
-        </label>
+      {isMenuOpen && (
+        <section className="settings-panel" id="settings-panel" aria-label="Réglages">
+          <div className="controls" aria-label="Study controls">
+            <label>
+              <span>Thème</span>
+              <select value={selectedTheme} onChange={(event) => setSelectedTheme(event.target.value)}>
+                <option value="all">Tous</option>
+                {themes.map((theme) => (
+                  <option key={theme} value={theme}>
+                    {theme}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <label>
-          <span>Semaine</span>
-          <select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>
-            <option value="all">Toutes</option>
-            {weeks.map((week) => (
-              <option key={week} value={week}>
-                Semaine {week}
-              </option>
-            ))}
-          </select>
-        </label>
+            <label>
+              <span>Semaine</span>
+              <select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>
+                <option value="all">Toutes</option>
+                {weeks.map((week) => (
+                  <option key={week} value={week}>
+                    Semaine {week}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <label className="dialogue-select">
-          <span>Dialogue</span>
-          <select value={selectedDialogue} onChange={(event) => setSelectedDialogue(event.target.value)}>
-            <option value={NO_DIALOGUE}>Aucun</option>
-            {dialogues.map((dialogue) => (
-              <option key={dialogue} value={dialogue}>
-                {dialogue}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
+            <label className="dialogue-select">
+              <span>Dialogue</span>
+              <select value={selectedDialogue} onChange={(event) => setSelectedDialogue(event.target.value)}>
+                <option value={NO_DIALOGUE}>Aucun</option>
+                {dialogues.map((dialogue) => (
+                  <option key={dialogue} value={dialogue}>
+                    {dialogue}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-      <section className="mode-panel" aria-label="Display options">
-        <div className="segmented" role="group" aria-label="Study direction">
-          <button
-            className={studyDirection === 'zh-fr' ? 'active' : ''}
-            type="button"
-            onClick={() => setStudyDirection('zh-fr')}
-          >
-            中文 → FR
-          </button>
-          <button
-            className={studyDirection === 'fr-zh' ? 'active' : ''}
-            type="button"
-            onClick={() => setStudyDirection('fr-zh')}
-          >
-            FR → 中文
-          </button>
-        </div>
+          <div className="mode-panel" aria-label="Display options">
+            <div className="segmented" role="group" aria-label="Study direction">
+              <button
+                className={studyDirection === 'zh-fr' ? 'active' : ''}
+                type="button"
+                onClick={() => setStudyDirection('zh-fr')}
+              >
+                中文 → FR
+              </button>
+              <button
+                className={studyDirection === 'fr-zh' ? 'active' : ''}
+                type="button"
+                onClick={() => setStudyDirection('fr-zh')}
+              >
+                FR → 中文
+              </button>
+            </div>
 
-        <div className="tool-row">
-          <button className="icon-button" type="button" onClick={() => setShowPinyin((value) => !value)}>
-            {showPinyin ? <Eye size={19} /> : <EyeOff size={19} />}
-            <span>{showPinyin ? 'Pinyin' : 'Masqué'}</span>
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => setShuffleKey((value) => value + 1)}
-            disabled={isDialogueMode}
-          >
-            <Shuffle size={19} />
-            <span>{isDialogueMode ? 'Ordonné' : 'Mélanger'}</span>
-          </button>
-        </div>
-      </section>
+            <div className="segmented" role="group" aria-label="View mode">
+              <button
+                className={viewMode === 'card' ? 'active' : ''}
+                type="button"
+                onClick={() => setViewMode('card')}
+              >
+                Carte
+              </button>
+              <button
+                className={viewMode === 'list' ? 'active' : ''}
+                type="button"
+                onClick={() => setViewMode('list')}
+              >
+                Liste
+              </button>
+            </div>
+
+            <div className="tool-row">
+              <button className="icon-button" type="button" onClick={() => setShowPinyin((value) => !value)}>
+                {showPinyin ? <Eye size={19} /> : <EyeOff size={19} />}
+                <span>{showPinyin ? 'Pinyin' : 'Masqué'}</span>
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={toggleShuffle}
+                disabled={isDialogueMode || viewMode === 'list'}
+              >
+                <Shuffle size={19} />
+                <span>{isShuffled && !isDialogueMode && viewMode !== 'list' ? 'Mélangés' : 'Non mélangés'}</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="study-area" aria-live="polite">
         {loadState === 'loading' && <p className="empty-state">Chargement des cartes...</p>}
@@ -343,7 +403,7 @@ function App() {
           <p className="empty-state">Aucune carte ne correspond à ces filtres.</p>
         )}
 
-        {currentCard && (
+        {currentCard && viewMode === 'card' && (
           <>
             <div className="card-meta">
               <span>
@@ -401,8 +461,51 @@ function App() {
             </div>
           </>
         )}
+
+        {currentCard && viewMode === 'list' && (
+          <div className="list-mode" aria-label="Liste des cartes">
+            {orderedFilteredCards.map((card) => {
+              const isListFlipped = flippedListCards.has(card.id);
+              const side = isListFlipped ? back : front;
+
+              return (
+                <article className={`list-card ${isListFlipped ? 'flipped' : ''}`} key={card.id}>
+                  <button
+                    className="list-speaker"
+                    type="button"
+                    onClick={(event) => playCardChinese(card, event)}
+                    aria-label={`Écouter ${card.chinese}`}
+                  >
+                    <Volume2 size={20} />
+                  </button>
+                  <button className="list-card-body" type="button" onClick={() => toggleListCard(card.id)}>
+                    <ListCardFace card={card} side={side} showPinyin={showPinyin} />
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
     </main>
+  );
+}
+
+function ListCardFace({ card, side, showPinyin }) {
+  if (side === 'french') {
+    return (
+      <span className="list-face french-list-face">
+        <strong>{card.french}</strong>
+        {card.notes && <small>{card.notes}</small>}
+      </span>
+    );
+  }
+
+  return (
+    <span className="list-face chinese-list-face">
+      <strong>{card.chinese}</strong>
+      {showPinyin && <em>{card.pinyin}</em>}
+    </span>
   );
 }
 
