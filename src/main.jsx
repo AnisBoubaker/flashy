@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const CSV_URL = '/data/cards.csv';
+const CSV_URL = `${import.meta.env.BASE_URL}data/cards.csv`;
 
 function parseCsv(text) {
   const rows = [];
