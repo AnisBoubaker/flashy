@@ -1,0 +1,19 @@
+{
+  "name": "Flashy Chinese",
+  "short_name": "Flashy",
+  "description": "Flashcards for learning Chinese with pinyin, French translations, and audio.",
+  "start_url": "/flashy/",
+  "scope": "/flashy/",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#18776b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

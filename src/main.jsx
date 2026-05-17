@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  MessageCircle,
   RefreshCcw,
   RotateCcw,
   Shuffle,
@@ -16,6 +17,13 @@ import {
 import './styles.css';
 
 const CSV_URL = `${import.meta.env.BASE_URL}data/cards.csv`;
+const NO_DIALOGUE = 'all';
+
+function inferDialogue(theme) {
+  const normalized = theme?.trim() ?? '';
+  if (/^(du[iì]\s*hu[aà]|对话)\s*\d+/i.test(normalized)) return normalized;
+  return '';
+}
 
 function parseCsv(text) {
   const rows = [];
@@ -54,10 +62,16 @@ function parseCsv(text) {
 
   return body.map((cells, index) => {
     const item = Object.fromEntries(keys.map((key, cellIndex) => [key, cells[cellIndex] ?? '']));
+    const dialogue = item.dialogue || inferDialogue(item.theme);
+    const order = Number.parseInt(item.order || item.position || item.line, 10);
+
     return {
       id: `${item.week}-${item.theme}-${item.chinese}-${index}`,
+      csvIndex: index,
       week: Number.parseInt(item.week, 10) || 0,
       theme: item.theme,
+      dialogue,
+      order: Number.isFinite(order) ? order : index + 1,
       chinese: item.chinese,
       pinyin: item.pinyin,
       french: item.french,
@@ -102,11 +116,22 @@ function shuffleCards(cards) {
     .map(({ card }) => card);
 }
 
+function sortCardsForStudy(cards, selectedDialogue) {
+  if (selectedDialogue === NO_DIALOGUE) return cards;
+
+  return [...cards].sort((a, b) => {
+    if (a.week !== b.week) return a.week - b.week;
+    if (a.order !== b.order) return a.order - b.order;
+    return a.csvIndex - b.csvIndex;
+  });
+}
+
 function App() {
   const [cards, setCards] = useState([]);
   const [loadState, setLoadState] = useState('loading');
   const [selectedTheme, setSelectedTheme] = useState('all');
   const [selectedWeek, setSelectedWeek] = useState('all');
+  const [selectedDialogue, setSelectedDialogue] = useState(NO_DIALOGUE);
   const [studyDirection, setStudyDirection] = useState('zh-fr');
   const [showPinyin, setShowPinyin] = useState(true);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -141,28 +166,50 @@ function App() {
     return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
   }, []);
 
-  const themes = useMemo(() => uniqueSorted(cards.map((card) => card.theme)), [cards]);
   const weeks = useMemo(() => uniqueSorted(cards.map((card) => card.week)), [cards]);
+  const weekCards = useMemo(
+    () => cards.filter((card) => selectedWeek === 'all' || String(card.week) === selectedWeek),
+    [cards, selectedWeek],
+  );
+  const themes = useMemo(() => uniqueSorted(weekCards.map((card) => card.theme)), [weekCards]);
+  const dialogues = useMemo(() => {
+    return uniqueSorted(weekCards.map((card) => card.dialogue));
+  }, [weekCards]);
 
   const filteredCards = useMemo(() => {
     const filtered = cards.filter((card) => {
       const themeMatches = selectedTheme === 'all' || card.theme === selectedTheme;
       const weekMatches = selectedWeek === 'all' || String(card.week) === selectedWeek;
-      return themeMatches && weekMatches;
+      const dialogueMatches = selectedDialogue === NO_DIALOGUE || card.dialogue === selectedDialogue;
+      return themeMatches && weekMatches && dialogueMatches;
     });
 
+    if (selectedDialogue !== NO_DIALOGUE) return sortCardsForStudy(filtered, selectedDialogue);
     return shuffleKey ? shuffleCards(filtered) : filtered;
-  }, [cards, selectedTheme, selectedWeek, shuffleKey]);
+  }, [cards, selectedTheme, selectedWeek, selectedDialogue, shuffleKey]);
 
   const currentCard = filteredCards[currentIndex] ?? null;
   const total = filteredCards.length;
   const frontIsChinese = studyDirection === 'zh-fr';
   const chineseVoice = useMemo(() => findChineseVoice(voices), [voices]);
+  const isDialogueMode = selectedDialogue !== NO_DIALOGUE;
+
+  useEffect(() => {
+    if (selectedTheme !== 'all' && !themes.includes(selectedTheme)) {
+      setSelectedTheme('all');
+    }
+  }, [themes, selectedTheme]);
+
+  useEffect(() => {
+    if (selectedDialogue !== NO_DIALOGUE && !dialogues.includes(selectedDialogue)) {
+      setSelectedDialogue(NO_DIALOGUE);
+    }
+  }, [dialogues, selectedDialogue]);
 
   useEffect(() => {
     setCurrentIndex(0);
     setIsFlipped(false);
-  }, [selectedTheme, selectedWeek, studyDirection, showPinyin, shuffleKey]);
+  }, [selectedTheme, selectedWeek, selectedDialogue, studyDirection, showPinyin, shuffleKey]);
 
   useEffect(() => {
     if (currentIndex > Math.max(total - 1, 0)) {
@@ -240,6 +287,18 @@ function App() {
             ))}
           </select>
         </label>
+
+        <label className="dialogue-select">
+          <span>Dialogue</span>
+          <select value={selectedDialogue} onChange={(event) => setSelectedDialogue(event.target.value)}>
+            <option value={NO_DIALOGUE}>Aucun</option>
+            {dialogues.map((dialogue) => (
+              <option key={dialogue} value={dialogue}>
+                {dialogue}
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
 
       <section className="mode-panel" aria-label="Display options">
@@ -265,9 +324,14 @@ function App() {
             {showPinyin ? <Eye size={19} /> : <EyeOff size={19} />}
             <span>{showPinyin ? 'Pinyin' : 'Masqué'}</span>
           </button>
-          <button className="icon-button" type="button" onClick={() => setShuffleKey((value) => value + 1)}>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => setShuffleKey((value) => value + 1)}
+            disabled={isDialogueMode}
+          >
             <Shuffle size={19} />
-            <span>Mélanger</span>
+            <span>{isDialogueMode ? 'Ordonné' : 'Mélanger'}</span>
           </button>
         </div>
       </section>
@@ -290,6 +354,12 @@ function App() {
                 <SlidersHorizontal size={15} />
                 Semaine {currentCard.week}
               </span>
+              {currentCard.dialogue && (
+                <span>
+                  <MessageCircle size={15} />
+                  {currentCard.dialogue}
+                </span>
+              )}
             </div>
 
             <button
@@ -361,3 +431,9 @@ createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 );
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+  });
+}

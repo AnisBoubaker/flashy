@@ -91,6 +91,10 @@ h1 {
   margin-bottom: 10px;
 }
 
+.dialogue-select {
+  grid-column: 1 / -1;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -166,6 +170,12 @@ select {
   background: #26332f;
   color: #ffffff;
   font-weight: 850;
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  background: #8a938d;
+  color: #eef1ed;
 }
 
 .study-area {
@@ -332,6 +342,14 @@ select {
 
   .mode-panel {
     grid-template-columns: 1.2fr 0.8fr;
+  }
+
+  .controls {
+    grid-template-columns: 1fr 1fr 1.2fr;
+  }
+
+  .dialogue-select {
+    grid-column: auto;
   }
 
   .flash-card {
