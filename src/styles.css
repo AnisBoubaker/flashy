@@ -222,7 +222,7 @@ select {
     #fffdf8;
   box-shadow: 0 22px 44px rgba(31, 28, 20, 0.14);
   color: #17221e;
-  overflow: hidden;
+  overflow: auto;
   touch-action: pan-y;
 }
 
